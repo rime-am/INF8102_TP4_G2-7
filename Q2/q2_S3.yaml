@@ -1,0 +1,27 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: TP4 - Q2 - Secure S3 bucket (KMS, versioning, public block)
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: polystudentstacks3
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: arn:aws:kms:us-east-1:807867956908:key/mrk-e22f95147c534236b2220a1d7062413b
+      VersioningConfiguration:
+        Status: Enabled
+
+Outputs:
+  S3Bucket:
+    Description: Bucket Created! :)
+    Value: !Ref S3Bucket
