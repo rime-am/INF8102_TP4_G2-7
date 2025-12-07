@@ -14,7 +14,7 @@ Parameters:
   CloudTrailLogBucketName:
     Type: String
     Default: polystudents3-ct-logs-burle-20251205
-    Description: "Doit etre UNIQUE (S3 est global).
+    Description: "Doit etre UNIQUE (S3 est global)"
 
 Resources:
   DestinationBucket:
@@ -184,3 +184,4 @@ Outputs:
     Value: !Ref CloudTrailLogBucket
   TrailName:
     Value: !Ref Polystudents3CloudTrail
+
