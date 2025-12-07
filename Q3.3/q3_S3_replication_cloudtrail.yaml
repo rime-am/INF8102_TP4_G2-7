@@ -1,0 +1,186 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "S3 replication + CloudTrail (object write/delete)"
+
+Parameters:
+  SourceBucketName:
+    Type: String
+    Default: polystudentstacks3
+  DestinationBucketName:
+    Type: String
+    Default: polystudentstacks3-back
+  KmsKeyArn:
+    Type: String
+    Default: arn:aws:kms:us-east-1:807867956908:key/mrk-e22f95147c534236b2220a1d7062413b
+  CloudTrailLogBucketName:
+    Type: String
+    Default: polystudents3-ct-logs-burle-20251205
+    Description: "Doit etre UNIQUE (S3 est global).
+
+Resources:
+  DestinationBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Ref DestinationBucketName
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref KmsKeyArn
+      VersioningConfiguration:
+        Status: Enabled
+
+  ReplicationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3ReplicationPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetReplicationConfiguration
+                  - s3:ListBucket
+                  - s3:GetBucketVersioning
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}"
+
+              - Effect: Allow
+                Action:
+                  - s3:GetObjectVersion
+                  - s3:GetObjectVersionAcl
+                  - s3:GetObjectVersionTagging
+                  - s3:GetObjectVersionForReplication
+                Resource: !Sub "arn:aws:s3:::${SourceBucketName}/*"
+
+              - Effect: Allow
+                Action:
+                  - s3:ReplicateObject
+                  - s3:ReplicateDelete
+                  - s3:ReplicateTags
+                  - s3:ObjectOwnerOverrideToBucketOwner
+                Resource: !Sub "${DestinationBucket.Arn}/*"
+
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:ReEncrypt*
+                  - kms:GenerateDataKey*
+                  - kms:DescribeKey
+                Resource: !Ref KmsKeyArn
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    DependsOn:
+      - DestinationBucket
+      - ReplicationRole
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Ref SourceBucketName
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref KmsKeyArn
+      VersioningConfiguration:
+        Status: Enabled
+      ReplicationConfiguration:
+        Role: !GetAtt ReplicationRole.Arn
+        Rules:
+          - Id: ReplicateAll
+            Status: Enabled
+            Priority: 1
+            Filter: {}
+            SourceSelectionCriteria:
+              SseKmsEncryptedObjects:
+                Status: Enabled
+            Destination:
+              Bucket: !GetAtt DestinationBucket.Arn
+              EncryptionConfiguration:
+                ReplicaKmsKeyID: !Ref KmsKeyArn
+            DeleteMarkerReplication:
+              Status: Enabled
+
+  CloudTrailLogBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Ref CloudTrailLogBucketName
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  CloudTrailLogBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CloudTrailLogBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AWSCloudTrailAclCheck
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource: !GetAtt CloudTrailLogBucket.Arn
+
+          - Sid: AWSCloudTrailWrite
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub "${CloudTrailLogBucket.Arn}/AWSLogs/${AWS::AccountId}/*"
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+
+  Polystudents3CloudTrail:
+    Type: AWS::CloudTrail::Trail
+    DependsOn:
+      - CloudTrailLogBucketPolicy
+    Properties:
+      TrailName: Polystudents3CloudTrail
+      IsLogging: true
+      S3BucketName: !Ref CloudTrailLogBucket
+      EnableLogFileValidation: true
+      IsMultiRegionTrail: false
+      EventSelectors:
+        - ReadWriteType: WriteOnly
+          IncludeManagementEvents: true
+          DataResources:
+            - Type: AWS::S3::Object
+              Values:
+                - !Sub "arn:aws:s3:::${S3Bucket}/"
+
+Outputs:
+  SourceBucket:
+    Value: !Ref S3Bucket
+  DestinationBucket:
+    Value: !Ref DestinationBucket
+  CloudTrailLogBucket:
+    Value: !Ref CloudTrailLogBucket
+  TrailName:
+    Value: !Ref Polystudents3CloudTrail
